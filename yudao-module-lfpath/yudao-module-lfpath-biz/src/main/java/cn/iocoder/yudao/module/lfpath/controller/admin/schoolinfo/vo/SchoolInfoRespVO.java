@@ -15,7 +15,7 @@ import cn.iocoder.yudao.framework.excel.core.convert.DictConvert;
 public class SchoolInfoRespVO {
 
     @Schema(description = "编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "5574")
-    @ExcelProperty("编号")
+    //@ExcelProperty("编号")
     private Long id;
 
     @Schema(description = "学校名称", requiredMode = Schema.RequiredMode.REQUIRED, example = "李四")
@@ -45,7 +45,7 @@ public class SchoolInfoRespVO {
     private String educationSystem;
 
     @Schema(description = "创建时间", requiredMode = Schema.RequiredMode.REQUIRED)
-    @ExcelProperty("创建时间")
+    //@ExcelProperty("创建时间")
     private LocalDateTime createTime;
 
 }
