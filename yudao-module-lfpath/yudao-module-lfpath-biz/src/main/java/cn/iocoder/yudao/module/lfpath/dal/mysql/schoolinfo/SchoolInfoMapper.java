@@ -29,4 +29,8 @@ public interface SchoolInfoMapper extends BaseMapperX<SchoolInfoDO> {
                 .orderByDesc(SchoolInfoDO::getId));
     }
 
+    default SchoolInfoDO selectBySchoolName(String schoolName) {
+        return selectOne(SchoolInfoDO::getSchoolName, schoolName);
+    }
+
 }
