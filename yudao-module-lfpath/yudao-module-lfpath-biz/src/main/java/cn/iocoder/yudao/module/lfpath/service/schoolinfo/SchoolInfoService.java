@@ -52,4 +52,6 @@ public interface SchoolInfoService {
      */
     PageResult<SchoolInfoDO> getSchoolInfoPage(SchoolInfoPageReqVO pageReqVO);
 
+    SchoolImportRespVO importSchoolList(List<SchoolInfoImportExcelVO> importSchoolList, boolean isUpdateSupport);
+
 }
