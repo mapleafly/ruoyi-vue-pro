@@ -23,6 +23,6 @@ public class CandidateScoreDistributionPageReqVO extends PageParam {
     private String province;
 
     @Schema(description = "年份")
-    private LocalDateTime year;
+    private String year;
 
 }

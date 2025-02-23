@@ -4,7 +4,6 @@ import lombok.*;
 import java.util.*;
 import java.time.LocalDateTime;
 import java.time.LocalDateTime;
-import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.*;
 import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
 
@@ -42,11 +41,15 @@ public class CandidateScoreDistributionDO extends BaseDO {
     private Integer cumulativeCount;
     /**
      * 省份
+     *
+     * 枚举 {@link TODO provinces 对应的类}
      */
     private String province;
     /**
      * 年份
+     *
+     * 枚举 {@link TODO lfpath_years 对应的类}
      */
-    private LocalDateTime year;
+    private String year;
 
 }
