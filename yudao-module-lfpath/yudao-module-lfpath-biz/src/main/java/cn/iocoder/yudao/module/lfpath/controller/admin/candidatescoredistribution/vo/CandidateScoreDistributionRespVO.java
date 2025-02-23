@@ -3,16 +3,16 @@ package cn.iocoder.yudao.module.lfpath.controller.admin.candidatescoredistributi
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 import java.util.*;
-import org.springframework.format.annotation.DateTimeFormat;
-import java.time.LocalDateTime;
 import com.alibaba.excel.annotation.*;
+import cn.iocoder.yudao.framework.excel.core.annotations.DictFormat;
+import cn.iocoder.yudao.framework.excel.core.convert.DictConvert;
 
 @Schema(description = "管理后台 - 考生分数分布 Response VO")
 @Data
 @ExcelIgnoreUnannotated
 public class CandidateScoreDistributionRespVO {
 
-    @Schema(description = "编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "5471")
+    @Schema(description = "编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "31729")
     @ExcelProperty("编号")
     private Long id;
 
@@ -20,20 +20,22 @@ public class CandidateScoreDistributionRespVO {
     @ExcelProperty("分数")
     private String score;
 
-    @Schema(description = "本段人数", requiredMode = Schema.RequiredMode.REQUIRED, example = "28410")
+    @Schema(description = "本段人数", requiredMode = Schema.RequiredMode.REQUIRED, example = "5756")
     @ExcelProperty("本段人数")
     private Integer segmentCount;
 
-    @Schema(description = "累计人数", requiredMode = Schema.RequiredMode.REQUIRED, example = "27256")
+    @Schema(description = "累计人数", requiredMode = Schema.RequiredMode.REQUIRED, example = "25876")
     @ExcelProperty("累计人数")
     private Integer cumulativeCount;
 
     @Schema(description = "省份", requiredMode = Schema.RequiredMode.REQUIRED)
-    @ExcelProperty("省份")
+    @ExcelProperty(value = "省份", converter = DictConvert.class)
+    @DictFormat("provinces") // TODO 代码优化：建议设置到对应的 DictTypeConstants 枚举类中
     private String province;
 
     @Schema(description = "年份", requiredMode = Schema.RequiredMode.REQUIRED)
-    @ExcelProperty("年份")
-    private LocalDateTime year;
+    @ExcelProperty(value = "年份", converter = DictConvert.class)
+    @DictFormat("lfpath_years") // TODO 代码优化：建议设置到对应的 DictTypeConstants 枚举类中
+    private String year;
 
 }
