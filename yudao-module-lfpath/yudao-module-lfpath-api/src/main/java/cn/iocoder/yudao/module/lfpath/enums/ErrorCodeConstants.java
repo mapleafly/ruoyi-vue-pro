@@ -13,4 +13,7 @@ public interface ErrorCodeConstants {
     ErrorCode SCHOOL_INFO_NOT_EXISTS = new ErrorCode(1_111_001_001, "高校信息不存在");
     ErrorCode SCHOOL_IMPORT_LIST_IS_EMPTY = new ErrorCode(1_111_001_002, "导入高校数据不能为空！");
     ErrorCode SCHOOL_SCHOOLNAME_EXISTS = new ErrorCode(1_111_001_003, "高校名称已经存在");
+
+    // ========== 考生分数分布信息 1-111-002-000 ==========
+    ErrorCode CANDIDATE_SCORE_DISTRIBUTION_NOT_EXISTS = new ErrorCode(1-111-002-001, "考生分数分布不存在");
 }
