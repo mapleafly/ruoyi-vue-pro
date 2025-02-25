@@ -52,4 +52,13 @@ public interface CandidateScoreDistributionService {
      */
     PageResult<CandidateScoreDistributionDO> getCandidateScoreDistributionPage(CandidateScoreDistributionPageReqVO pageReqVO);
 
+    /**
+     * 导入考生分数分布列表
+     *
+     * @param importList 导入列表
+     * @param isUpdateSupport 是否支持更新
+     * @return 导入结果
+     */
+    CandidateScoreDistributionImportRespVO importCandidateScoreDistributionList(List<CandidateScoreDistributionImportExcelVO> importList, boolean isUpdateSupport);
+
 }

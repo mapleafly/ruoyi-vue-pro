@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.lfpath.service.candidatescoredistribution;
 
+import cn.hutool.core.collection.CollUtil;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 import org.springframework.validation.annotation.Validated;
@@ -69,6 +70,39 @@ public class CandidateScoreDistributionServiceImpl implements CandidateScoreDist
     @Override
     public PageResult<CandidateScoreDistributionDO> getCandidateScoreDistributionPage(CandidateScoreDistributionPageReqVO pageReqVO) {
         return candidateScoreDistributionMapper.selectPage(pageReqVO);
+    }
+
+    @Override
+    public CandidateScoreDistributionImportRespVO importCandidateScoreDistributionList(List<CandidateScoreDistributionImportExcelVO> importList, boolean isUpdateSupport) {
+        // 1.1 参数校验
+        if (CollUtil.isEmpty(importList)) {
+            throw exception(CANDIDATE_SCORE_DISTRIBUTION_IMPORT_LIST_IS_EMPTY);
+        }
+        // 2. 遍历，逐个创建 or 更新
+        CandidateScoreDistributionImportRespVO respVO = CandidateScoreDistributionImportRespVO.builder()
+                .createCandidateScoreDistributions(new ArrayList<>())
+                .updateCandidateScoreDistributions(new ArrayList<>())
+                .failureCandidateScoreDistributions(new LinkedHashMap<>())
+                .build();
+        importList.forEach(importItem -> {
+            // 2.2.1 判断如果不存在，在进行插入
+            CandidateScoreDistributionDO existItem = candidateScoreDistributionMapper.selectByScoreAndProvinceAndYear(importItem.getScore(), importItem.getProvince(), importItem.getYear());
+            if (existItem == null) {
+                candidateScoreDistributionMapper.insert(BeanUtils.toBean(importItem, CandidateScoreDistributionDO.class));
+                respVO.getCreateCandidateScoreDistributions().add(importItem.getScore());
+                return;
+            }
+            // 2.2.2 如果存在，判断是否允许更新
+            if (!isUpdateSupport) {
+                respVO.getFailureCandidateScoreDistributions().put(importItem.getScore(), CANDIDATE_SCORE_DISTRIBUTION_EXISTS.getMsg());
+                return;
+            }
+            CandidateScoreDistributionDO updateItem = BeanUtils.toBean(importItem, CandidateScoreDistributionDO.class);
+            updateItem.setId(existItem.getId());
+            candidateScoreDistributionMapper.updateById(updateItem);
+            respVO.getUpdateCandidateScoreDistributions().add(importItem.getScore());
+        });
+        return respVO;
     }
 
 }
