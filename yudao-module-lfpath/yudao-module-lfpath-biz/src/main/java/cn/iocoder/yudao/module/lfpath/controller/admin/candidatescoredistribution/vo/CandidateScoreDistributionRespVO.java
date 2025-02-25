@@ -13,7 +13,7 @@ import cn.iocoder.yudao.framework.excel.core.convert.DictConvert;
 public class CandidateScoreDistributionRespVO {
 
     @Schema(description = "编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "31729")
-    @ExcelProperty("编号")
+    //@ExcelProperty("编号")
     private Long id;
 
     @Schema(description = "分数", requiredMode = Schema.RequiredMode.REQUIRED)
@@ -30,12 +30,12 @@ public class CandidateScoreDistributionRespVO {
 
     @Schema(description = "省份", requiredMode = Schema.RequiredMode.REQUIRED)
     @ExcelProperty(value = "省份", converter = DictConvert.class)
-    @DictFormat("provinces") // TODO 代码优化：建议设置到对应的 DictTypeConstants 枚举类中
+    @DictFormat("provinces")
     private String province;
 
     @Schema(description = "年份", requiredMode = Schema.RequiredMode.REQUIRED)
     @ExcelProperty(value = "年份", converter = DictConvert.class)
-    @DictFormat("lfpath_years") // TODO 代码优化：建议设置到对应的 DictTypeConstants 枚举类中
+    @DictFormat("lfpath_years")
     private String year;
 
 }
