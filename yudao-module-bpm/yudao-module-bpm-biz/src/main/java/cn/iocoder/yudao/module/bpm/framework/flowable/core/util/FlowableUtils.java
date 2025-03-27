@@ -1,6 +1,5 @@
 package cn.iocoder.yudao.module.bpm.framework.flowable.core.util;
 
-import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.extra.spring.SpringUtil;
 import cn.iocoder.yudao.framework.common.core.KeyValue;
@@ -25,10 +24,7 @@ import org.flowable.engine.impl.util.CommandContextUtil;
 import org.flowable.engine.runtime.ProcessInstance;
 import org.flowable.task.api.TaskInfo;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
@@ -194,35 +190,10 @@ public class FlowableUtils {
     @SuppressWarnings("unchecked")
     public static Map<String, List<Long>> getStartUserSelectAssignees(Map<String, Object> processVariables) {
         if (processVariables == null) {
-            return new HashMap<>();
+            return null;
         }
         return (Map<String, List<Long>>) processVariables.get(
                 BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_START_USER_SELECT_ASSIGNEES);
-    }
-
-    /**
-     * 获得流程实例的审批用户选择的下一个节点的审批人 Map
-     *
-     * @param processInstance 流程实例
-     * @return 审批用户选择的下一个节点的审批人Map
-     */
-    public static Map<String, List<Long>> getApproveUserSelectAssignees(ProcessInstance processInstance) {
-        return processInstance != null ? getApproveUserSelectAssignees(processInstance.getProcessVariables()) : null;
-    }
-
-    /**
-     * 获得流程实例的审批用户选择的下一个节点的审批人 Map
-     *
-     * @param processVariables 流程变量
-     * @return 审批用户选择的下一个节点的审批人Map Map
-     */
-    @SuppressWarnings("unchecked")
-    public static Map<String, List<Long>> getApproveUserSelectAssignees(Map<String, Object> processVariables) {
-        if (processVariables == null) {
-            return new HashMap<>();
-        }
-        return (Map<String, List<Long>>) processVariables.get(
-                BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_APPROVE_USER_SELECT_ASSIGNEES);
     }
 
     /**
@@ -269,7 +240,7 @@ public class FlowableUtils {
         return formFieldsMap.entrySet().stream()
                 .limit(3)
                 .map(entry -> new KeyValue<>(entry.getValue().getTitle(),
-                        MapUtil.getStr(processVariables, entry.getValue().getField(), "")))
+                        processVariables.getOrDefault(entry.getValue().getField(), "").toString()))
                 .collect(Collectors.toList());
     }
 

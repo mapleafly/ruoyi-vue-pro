@@ -5,27 +5,25 @@ import cn.hutool.core.lang.Assert;
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.*;
 import cn.iocoder.yudao.framework.common.util.collection.CollectionUtils;
-import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
 import cn.iocoder.yudao.module.bpm.controller.admin.definition.vo.model.simple.BpmSimpleModelNodeVO;
 import cn.iocoder.yudao.module.bpm.controller.admin.definition.vo.model.simple.BpmSimpleModelNodeVO.ConditionGroups;
 import cn.iocoder.yudao.module.bpm.enums.definition.*;
 import cn.iocoder.yudao.module.bpm.framework.flowable.core.enums.BpmTaskCandidateStrategyEnum;
-import cn.iocoder.yudao.module.bpm.framework.flowable.core.enums.BpmnVariableConstants;
+import cn.iocoder.yudao.module.bpm.framework.flowable.core.enums.BpmnModelConstants;
 import cn.iocoder.yudao.module.bpm.framework.flowable.core.listener.BpmCopyTaskDelegate;
 import cn.iocoder.yudao.module.bpm.framework.flowable.core.listener.BpmTriggerTaskDelegate;
-import cn.iocoder.yudao.module.bpm.service.task.listener.BpmCallActivityListener;
-import cn.iocoder.yudao.module.bpm.service.task.listener.BpmUserTaskListener;
 import org.flowable.bpmn.BpmnAutoLayout;
 import org.flowable.bpmn.constants.BpmnXMLConstants;
 import org.flowable.bpmn.model.Process;
 import org.flowable.bpmn.model.*;
-import org.flowable.engine.delegate.ExecutionListener;
 import org.flowable.engine.delegate.TaskListener;
+import org.springframework.util.MultiValueMap;
 
 import java.util.*;
 
 import static cn.iocoder.yudao.module.bpm.framework.flowable.core.enums.BpmnModelConstants.*;
 import static cn.iocoder.yudao.module.bpm.framework.flowable.core.util.BpmnModelUtils.*;
+import static cn.iocoder.yudao.module.bpm.service.task.listener.BpmUserTaskListener.DELEGATE_EXPRESSION;
 import static java.util.Arrays.asList;
 
 /**
@@ -42,10 +40,9 @@ public class SimpleModelUtils {
 
     static {
         List<NodeConvert> converts = asList(new StartNodeConvert(), new EndNodeConvert(),
-                new StartUserNodeConvert(), new ApproveNodeConvert(), new CopyNodeConvert(), new TransactorNodeConvert(),
+                new StartUserNodeConvert(), new ApproveNodeConvert(), new CopyNodeConvert(),
                 new DelayTimerNodeConvert(), new TriggerNodeConvert(),
-                new ConditionBranchNodeConvert(), new ParallelBranchNodeConvert(), new InclusiveBranchNodeConvert(), new RouteBranchNodeConvert(),
-                new ChildProcessConvert());
+                new ConditionBranchNodeConvert(), new ParallelBranchNodeConvert(), new InclusiveBranchNodeConvert(), new RouteBranchNodeConvert());
         converts.forEach(convert -> NODE_CONVERTS.put(convert.getType(), convert));
     }
 
@@ -81,7 +78,7 @@ public class SimpleModelUtils {
         traverseNodeToBuildFlowNode(startNode, process);
 
         // 3. 构建并添加节点之间的连线 Sequence Flow
-        EndEvent endEvent = getEndEvent(bpmnModel);
+        EndEvent endEvent = BpmnModelUtils.getEndEvent(bpmnModel);
         traverseNodeToBuildSequenceFlow(process, startNode, endEvent.getId());
 
         // 4. 自动布局
@@ -167,34 +164,13 @@ public class SimpleModelUtils {
         // 情况一：有“子”节点，则建立连线
         // 情况二：没有“子节点”，则直接跟 targetNodeId 建立连线。例如说，结束节点、条件分支（分支节点的孩子节点或聚合节点）的最后一个节点
         String finalTargetNodeId = isChildNodeValid ? childNode.getId() : targetNodeId;
-
-        // 如果没有附加节点：则直接建立连线
-        if (StrUtil.isEmpty(node.getAttachNodeId())) {
-            SequenceFlow sequenceFlow = buildBpmnSequenceFlow(node.getId(), finalTargetNodeId);
-            process.addFlowElement(sequenceFlow);
-        } else {
-            // 如果有附加节点：需要先建立和附加节点的连线，再建立附加节点和目标节点的连线。例如说，触发器节点（HTTP 回调）
-            List<SequenceFlow> sequenceFlows = buildAttachNodeSequenceFlow(node.getId(), node.getAttachNodeId(), finalTargetNodeId);
-            sequenceFlows.forEach(process::addFlowElement);
-        }
+        SequenceFlow sequenceFlow = buildBpmnSequenceFlow(node.getId(), finalTargetNodeId);
+        process.addFlowElement(sequenceFlow);
 
         // 因为有子节点，递归调用后续子节点
         if (isChildNodeValid) {
             traverseNodeToBuildSequenceFlow(process, childNode, targetNodeId);
         }
-    }
-
-    /**
-     * 构建有附加节点的连线
-     *
-     * @param nodeId 当前节点 ID
-     * @param attachNodeId 附属节点 ID
-     * @param targetNodeId 目标节点 ID
-     */
-    private static List<SequenceFlow> buildAttachNodeSequenceFlow(String nodeId, String attachNodeId, String targetNodeId) {
-        SequenceFlow sequenceFlow = buildBpmnSequenceFlow(nodeId, attachNodeId, null, null, null);
-        SequenceFlow attachSequenceFlow = buildBpmnSequenceFlow(attachNodeId, targetNodeId, null, null, null);
-        return CollUtil.newArrayList(sequenceFlow, attachSequenceFlow);
     }
 
     /**
@@ -361,7 +337,7 @@ public class SimpleModelUtils {
             userTask.setName(node.getName());
 
             // 人工审批
-            addExtensionElement(userTask, USER_TASK_APPROVE_TYPE, BpmUserTaskApproveTypeEnum.USER.getType());
+            addExtensionElement(userTask, BpmnModelConstants.USER_TASK_APPROVE_TYPE, BpmUserTaskApproveTypeEnum.USER.getType());
             // 候选人策略为发起人自己
             addCandidateElements(BpmTaskCandidateStrategyEnum.START_USER.getStrategy(), null, userTask);
             // 添加表单字段权限属性元素
@@ -412,17 +388,24 @@ public class SimpleModelUtils {
          */
         private BoundaryEvent buildUserTaskTimeoutBoundaryEvent(UserTask userTask,
                                                                 BpmSimpleModelNodeVO.TimeoutHandler timeoutHandler) {
-            // 1. 创建 Timeout Boundary Event
-            String timeCycle = null;
+            // 1.1 定时器边界事件
+            BoundaryEvent boundaryEvent = new BoundaryEvent();
+            boundaryEvent.setId("Event-" + IdUtil.fastUUID());
+            boundaryEvent.setCancelActivity(false); // 设置关联的任务为不会被中断
+            boundaryEvent.setAttachedToRef(userTask);
+            // 1.2 定义超时时间、最大提醒次数
+            TimerEventDefinition eventDefinition = new TimerEventDefinition();
+            eventDefinition.setTimeDuration(timeoutHandler.getTimeDuration());
             if (Objects.equals(BpmUserTaskTimeoutHandlerTypeEnum.REMINDER.getType(), timeoutHandler.getType()) &&
                     timeoutHandler.getMaxRemindCount() != null && timeoutHandler.getMaxRemindCount() > 1) {
-                timeCycle = String.format("R%d/%s",
-                        timeoutHandler.getMaxRemindCount(), timeoutHandler.getTimeDuration());
+                eventDefinition.setTimeCycle(String.format("R%d/%s",
+                        timeoutHandler.getMaxRemindCount(), timeoutHandler.getTimeDuration()));
             }
-            BoundaryEvent boundaryEvent = buildTimeoutBoundaryEvent(userTask, BpmBoundaryEventTypeEnum.USER_TASK_TIMEOUT.getType(),
-                    timeoutHandler.getTimeDuration(), timeCycle, null);
+            boundaryEvent.addEventDefinition(eventDefinition);
 
-            // 2 添加超时执行动作元素
+            // 2.1 添加定时器边界事件类型
+            addExtensionElement(boundaryEvent, BOUNDARY_EVENT_TYPE, BpmBoundaryEventTypeEnum.USER_TASK_TIMEOUT.getType());
+            // 2.2 添加超时执行动作元素
             addExtensionElement(boundaryEvent, USER_TASK_TIMEOUT_HANDLER_TYPE, timeoutHandler.getType());
             return boundaryEvent;
         }
@@ -462,8 +445,6 @@ public class SimpleModelUtils {
             addSignEnable(node.getSignEnable(), userTask);
             // 审批意见
             addReasonRequire(node.getReasonRequire(), userTask);
-            // 节点类型
-            addNodeType(node.getType(), userTask);
             return userTask;
         }
 
@@ -474,7 +455,7 @@ public class SimpleModelUtils {
                 FlowableListener flowableListener = new FlowableListener();
                 flowableListener.setEvent(TaskListener.EVENTNAME_CREATE);
                 flowableListener.setImplementationType(ImplementationType.IMPLEMENTATION_TYPE_DELEGATEEXPRESSION);
-                flowableListener.setImplementation(BpmUserTaskListener.DELEGATE_EXPRESSION);
+                flowableListener.setImplementation(DELEGATE_EXPRESSION);
                 addListenerConfig(flowableListener, node.getTaskCreateListener());
                 flowableListeners.add(flowableListener);
             }
@@ -483,7 +464,7 @@ public class SimpleModelUtils {
                 FlowableListener flowableListener = new FlowableListener();
                 flowableListener.setEvent(TaskListener.EVENTNAME_ASSIGNMENT);
                 flowableListener.setImplementationType(ImplementationType.IMPLEMENTATION_TYPE_DELEGATEEXPRESSION);
-                flowableListener.setImplementation(BpmUserTaskListener.DELEGATE_EXPRESSION);
+                flowableListener.setImplementation(DELEGATE_EXPRESSION);
                 addListenerConfig(flowableListener, node.getTaskAssignListener());
                 flowableListeners.add(flowableListener);
             }
@@ -492,7 +473,7 @@ public class SimpleModelUtils {
                 FlowableListener flowableListener = new FlowableListener();
                 flowableListener.setEvent(TaskListener.EVENTNAME_COMPLETE);
                 flowableListener.setImplementationType(ImplementationType.IMPLEMENTATION_TYPE_DELEGATEEXPRESSION);
-                flowableListener.setImplementation(BpmUserTaskListener.DELEGATE_EXPRESSION);
+                flowableListener.setImplementation(DELEGATE_EXPRESSION);
                 addListenerConfig(flowableListener, node.getTaskCompleteListener());
                 flowableListeners.add(flowableListener);
             }
@@ -505,7 +486,7 @@ public class SimpleModelUtils {
             BpmUserTaskApproveMethodEnum approveMethodEnum = BpmUserTaskApproveMethodEnum.valueOf(approveMethod);
             Assert.notNull(approveMethodEnum, "审批方式({})不能为空", approveMethodEnum);
             // 添加审批方式的扩展属性
-            addExtensionElement(userTask, USER_TASK_APPROVE_METHOD, approveMethod);
+            addExtensionElement(userTask, BpmnModelConstants.USER_TASK_APPROVE_METHOD, approveMethod);
             if (approveMethodEnum == BpmUserTaskApproveMethodEnum.RANDOM) {
                 // 随机审批，不需要设置多实例属性
                 return;
@@ -529,15 +510,6 @@ public class SimpleModelUtils {
                 multiInstanceCharacteristics.setSequential(false);
             }
             userTask.setLoopCharacteristics(multiInstanceCharacteristics);
-        }
-
-    }
-
-    private static class TransactorNodeConvert extends ApproveNodeConvert {
-
-        @Override
-        public BpmSimpleModelNodeTypeEnum getType() {
-            return BpmSimpleModelNodeTypeEnum.TRANSACTOR_NODE;
         }
 
     }
@@ -712,16 +684,20 @@ public class SimpleModelUtils {
 
             // 2. 添加接收任务的 Timer Boundary Event
             if (node.getDelaySetting() != null) {
-                BoundaryEvent boundaryEvent = null;
+                // 2.1 定时器边界事件
+                BoundaryEvent boundaryEvent = new BoundaryEvent();
+                boundaryEvent.setId("Event-" + IdUtil.fastUUID());
+                boundaryEvent.setCancelActivity(false);
+                boundaryEvent.setAttachedToRef(receiveTask);
+                // 2.2 定义超时时间
+                TimerEventDefinition eventDefinition = new TimerEventDefinition();
                 if (node.getDelaySetting().getDelayType().equals(BpmDelayTimerTypeEnum.FIXED_DATE_TIME.getType())) {
-                    boundaryEvent = buildTimeoutBoundaryEvent(receiveTask, BpmBoundaryEventTypeEnum.DELAY_TIMER_TIMEOUT.getType(),
-                            node.getDelaySetting().getDelayTime(), null, null);
+                    eventDefinition.setTimeDuration(node.getDelaySetting().getDelayTime());
                 } else if (node.getDelaySetting().getDelayType().equals(BpmDelayTimerTypeEnum.FIXED_TIME_DURATION.getType())) {
-                    boundaryEvent = buildTimeoutBoundaryEvent(receiveTask, BpmBoundaryEventTypeEnum.DELAY_TIMER_TIMEOUT.getType(),
-                            null, null, node.getDelaySetting().getDelayTime());
-                } else {
-                    throw new UnsupportedOperationException("不支持的延迟类型：" + node.getDelaySetting());
+                    eventDefinition.setTimeDate(node.getDelaySetting().getDelayTime());
                 }
+                boundaryEvent.addEventDefinition(eventDefinition);
+                addExtensionElement(boundaryEvent, BOUNDARY_EVENT_TYPE, BpmBoundaryEventTypeEnum.DELAY_TIMER_TIMEOUT.getType());
                 flowElements.add(boundaryEvent);
             }
             return flowElements;
@@ -736,36 +712,23 @@ public class SimpleModelUtils {
     public static class TriggerNodeConvert implements NodeConvert {
 
         @Override
-        public List<? extends FlowElement> convertList(BpmSimpleModelNodeVO node) {
-            Assert.notNull(node.getTriggerSetting(), "触发器节点设置不能为空");
-            List<FlowElement> flowElements = new ArrayList<>(2);
-            // HTTP 回调请求。需要附加一个 ReceiveTask、发起请求后、等待回调执行
-            if (BpmTriggerTypeEnum.HTTP_CALLBACK.getType().equals(node.getTriggerSetting().getType())) {
-                Assert.notNull(node.getTriggerSetting().getHttpRequestSetting(), "触发器 HTTP 回调请求设置不能为空");
-                ReceiveTask receiveTask = new ReceiveTask();
-                receiveTask.setId("Activity_" + IdUtil.fastUUID());
-                receiveTask.setName("HTTP 回调");
-                node.setAttachNodeId(receiveTask.getId());
-                flowElements.add(receiveTask);
-                // 重要：设置 callbackTaskDefineKey，用于 HTTP 回调
-                node.getTriggerSetting().getHttpRequestSetting().setCallbackTaskDefineKey(receiveTask.getId());
-            }
-
+        public ServiceTask convert(BpmSimpleModelNodeVO node) {
             // 触发器使用 ServiceTask 来实现
             ServiceTask serviceTask = new ServiceTask();
             serviceTask.setId(node.getId());
             serviceTask.setName(node.getName());
             serviceTask.setImplementationType(ImplementationType.IMPLEMENTATION_TYPE_DELEGATEEXPRESSION);
             serviceTask.setImplementation("${" + BpmTriggerTaskDelegate.BEAN_NAME + "}");
-            addExtensionElement(serviceTask, TRIGGER_TYPE, node.getTriggerSetting().getType());
-            if (node.getTriggerSetting().getHttpRequestSetting() != null) {
-                addExtensionElementJson(serviceTask, TRIGGER_PARAM, node.getTriggerSetting().getHttpRequestSetting());
+            if (node.getTriggerSetting() != null) {
+                addExtensionElement(serviceTask, TRIGGER_TYPE, node.getTriggerSetting().getType());
+                if (node.getTriggerSetting().getHttpRequestSetting() != null) {
+                    addExtensionElementJson(serviceTask, TRIGGER_PARAM, node.getTriggerSetting().getHttpRequestSetting());
+                }
+                if (node.getTriggerSetting().getNormalFormSetting() != null) {
+                    addExtensionElementJson(serviceTask, TRIGGER_PARAM, node.getTriggerSetting().getNormalFormSetting());
+                }
             }
-            if (node.getTriggerSetting().getFormSettings() != null) {
-                addExtensionElementJson(serviceTask, TRIGGER_PARAM, node.getTriggerSetting().getFormSettings());
-            }
-            flowElements.add(serviceTask);
-            return flowElements;
+            return serviceTask;
         }
 
         @Override
@@ -799,129 +762,8 @@ public class SimpleModelUtils {
 
     }
 
-    private static class ChildProcessConvert implements NodeConvert {
-
-        @Override
-        public List<FlowElement> convertList(BpmSimpleModelNodeVO node) {
-            List<FlowElement> flowElements = new ArrayList<>(2);
-            BpmSimpleModelNodeVO.ChildProcessSetting childProcessSetting = node.getChildProcessSetting();
-            List<IOParameter> inVariables = childProcessSetting.getInVariables() == null ?
-                    new ArrayList<>() : new ArrayList<>(childProcessSetting.getInVariables());
-            CallActivity callActivity = new CallActivity();
-            callActivity.setId(node.getId());
-            callActivity.setName(node.getName());
-            callActivity.setCalledElementType("key");
-            // 1. 是否异步
-            if (node.getChildProcessSetting().getAsync()) {
-                // TODO @lesan: 这里目前测试没有跳过执行call activity 后面的节点
-                callActivity.setAsynchronous(true);
-            }
-
-            // 2. 调用的子流程
-            callActivity.setCalledElement(childProcessSetting.getCalledProcessDefinitionKey());
-            callActivity.setProcessInstanceName(childProcessSetting.getCalledProcessDefinitionName());
-
-            // 3. 是否自动跳过子流程发起节点
-            IOParameter ioParameter = new IOParameter();
-            ioParameter.setSourceExpression(childProcessSetting.getSkipStartUserNode().toString());
-            ioParameter.setTarget(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_SKIP_START_USER_NODE);
-            inVariables.add(ioParameter);
-
-            // 4. 【默认需要传递的一些变量】流程状态
-            ioParameter = new IOParameter();
-            ioParameter.setSource(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_STATUS);
-            ioParameter.setTarget(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_STATUS);
-            inVariables.add(ioParameter);
-
-            // 5. 主→子变量传递、子->主变量传递
-            callActivity.setInParameters(inVariables);
-            if (ArrayUtil.isNotEmpty(childProcessSetting.getOutVariables()) && ObjUtil.notEqual(childProcessSetting.getAsync(), Boolean.TRUE)) {
-                callActivity.setOutParameters(childProcessSetting.getOutVariables());
-            }
-
-            // 6. 子流程发起人配置
-            List<FlowableListener> executionListeners = new ArrayList<>();
-            FlowableListener flowableListener = new FlowableListener();
-            flowableListener.setEvent(ExecutionListener.EVENTNAME_START);
-            flowableListener.setImplementationType(ImplementationType.IMPLEMENTATION_TYPE_DELEGATEEXPRESSION);
-            flowableListener.setImplementation(BpmCallActivityListener.DELEGATE_EXPRESSION);
-            FieldExtension fieldExtension = new FieldExtension();
-            fieldExtension.setFieldName("listenerConfig");
-            fieldExtension.setStringValue(JsonUtils.toJsonString(childProcessSetting.getStartUserSetting()));
-            flowableListener.getFieldExtensions().add(fieldExtension);
-            executionListeners.add(flowableListener);
-            callActivity.setExecutionListeners(executionListeners);
-
-            // 7. 超时设置
-            if (childProcessSetting.getTimeoutSetting() != null && Boolean.TRUE.equals(childProcessSetting.getTimeoutSetting().getEnable())) {
-                BoundaryEvent boundaryEvent = null;
-                if (childProcessSetting.getTimeoutSetting().getType().equals(BpmDelayTimerTypeEnum.FIXED_DATE_TIME.getType())) {
-                    boundaryEvent = buildTimeoutBoundaryEvent(callActivity, BpmBoundaryEventTypeEnum.DELAY_TIMER_TIMEOUT.getType(),
-                            childProcessSetting.getTimeoutSetting().getTimeExpression(), null, null);
-                } else if (childProcessSetting.getTimeoutSetting().getType().equals(BpmDelayTimerTypeEnum.FIXED_TIME_DURATION.getType())) {
-                    boundaryEvent = buildTimeoutBoundaryEvent(callActivity, BpmBoundaryEventTypeEnum.CHILD_PROCESS_TIMEOUT.getType(),
-                            null, null, childProcessSetting.getTimeoutSetting().getTimeExpression());
-                }
-                flowElements.add(boundaryEvent);
-            }
-
-            // 8. 多实例
-            if (childProcessSetting.getMultiInstanceSetting() != null && Boolean.TRUE.equals(childProcessSetting.getMultiInstanceSetting().getEnable())) {
-                MultiInstanceLoopCharacteristics multiInstanceCharacteristics = new MultiInstanceLoopCharacteristics();
-                multiInstanceCharacteristics.setSequential(childProcessSetting.getMultiInstanceSetting().getSequential());
-                if (childProcessSetting.getMultiInstanceSetting().getSourceType().equals(BpmChildProcessMultiInstanceSourceTypeEnum.FIXED_QUANTITY.getType())) {
-                    multiInstanceCharacteristics.setLoopCardinality(childProcessSetting.getMultiInstanceSetting().getSource());
-                }
-                if (childProcessSetting.getMultiInstanceSetting().getSourceType().equals(BpmChildProcessMultiInstanceSourceTypeEnum.NUMBER_FORM.getType()) ||
-                        childProcessSetting.getMultiInstanceSetting().getSourceType().equals(BpmChildProcessMultiInstanceSourceTypeEnum.MULTIPLE_FORM.getType())) {
-                    multiInstanceCharacteristics.setInputDataItem(childProcessSetting.getMultiInstanceSetting().getSource());
-                }
-                multiInstanceCharacteristics.setCompletionCondition(String.format(BpmUserTaskApproveMethodEnum.RATIO.getCompletionCondition(),
-                        String.format("%.2f", childProcessSetting.getMultiInstanceSetting().getApproveRatio() / 100D)));
-                callActivity.setLoopCharacteristics(multiInstanceCharacteristics);
-                addExtensionElement(callActivity, CHILD_PROCESS_MULTI_INSTANCE_SOURCE_TYPE, childProcessSetting.getMultiInstanceSetting().getSourceType());
-            }
-
-            // 添加节点类型
-            addNodeType(node.getType(), callActivity);
-            flowElements.add(callActivity);
-            return flowElements;
-        }
-
-        @Override
-        public BpmSimpleModelNodeTypeEnum getType() {
-            return BpmSimpleModelNodeTypeEnum.CHILD_PROCESS;
-        }
-
-    }
-
     private static String buildGatewayJoinId(String id) {
         return id + "_join";
-    }
-
-    private static BoundaryEvent buildTimeoutBoundaryEvent(Activity attachedToRef, Integer type,
-                                                           String timeDuration, String timeCycle, String timeDate) {
-        // 1.1 定时器边界事件
-        BoundaryEvent boundaryEvent = new BoundaryEvent();
-        boundaryEvent.setId("Event-" + IdUtil.fastUUID());
-        boundaryEvent.setCancelActivity(false); // 设置关联的任务为不会被中断
-        boundaryEvent.setAttachedToRef(attachedToRef);
-        // 1.2 定义超时时间表达式
-        TimerEventDefinition eventDefinition = new TimerEventDefinition();
-        if (ObjUtil.isNotNull(timeDuration)) {
-            eventDefinition.setTimeDuration(timeDuration);
-        }
-        if (ObjUtil.isNotNull(timeDuration)) {
-            eventDefinition.setTimeCycle(timeCycle);
-        }
-        if (ObjUtil.isNotNull(timeDate)) {
-            eventDefinition.setTimeDate(timeDate);
-        }
-        boundaryEvent.addEventDefinition(eventDefinition);
-
-        // 2. 添加定时器边界事件类型
-        addExtensionElement(boundaryEvent, BOUNDARY_EVENT_TYPE, type);
-        return boundaryEvent;
     }
 
     // ========== SIMPLE 流程预测相关的方法 ==========
@@ -943,13 +785,11 @@ public class SimpleModelUtils {
         BpmSimpleModelNodeTypeEnum nodeType = BpmSimpleModelNodeTypeEnum.valueOf(currentNode.getType());
         Assert.notNull(nodeType, "模型节点类型不支持");
 
-        // 情况：START_NODE/START_USER_NODE/APPROVE_NODE/COPY_NODE/END_NODE/TRANSACTOR_NODE
+        // 情况：START_NODE/START_USER_NODE/APPROVE_NODE/COPY_NODE/END_NODE
         if (nodeType == BpmSimpleModelNodeTypeEnum.START_NODE
                 || nodeType == BpmSimpleModelNodeTypeEnum.START_USER_NODE
                 || nodeType == BpmSimpleModelNodeTypeEnum.APPROVE_NODE
-                || nodeType == BpmSimpleModelNodeTypeEnum.TRANSACTOR_NODE
                 || nodeType == BpmSimpleModelNodeTypeEnum.COPY_NODE
-                || nodeType == BpmSimpleModelNodeTypeEnum.CHILD_PROCESS
                 || nodeType == BpmSimpleModelNodeTypeEnum.END_NODE) {
             // 添加元素
             resultNodes.add(currentNode);
@@ -959,8 +799,8 @@ public class SimpleModelUtils {
         if (nodeType == BpmSimpleModelNodeTypeEnum.CONDITION_BRANCH_NODE) {
             // 查找满足条件的 BpmSimpleModelNodeVO 节点
             BpmSimpleModelNodeVO matchConditionNode = CollUtil.findOne(currentNode.getConditionNodes(),
-                        conditionNode -> !BooleanUtil.isTrue(conditionNode.getConditionSetting().getDefaultFlow())
-                                && evalConditionExpress(variables, conditionNode.getConditionSetting()));
+                    conditionNode -> !BooleanUtil.isTrue(conditionNode.getConditionSetting().getDefaultFlow())
+                            && evalConditionExpress(variables, conditionNode.getConditionSetting()));
             if (matchConditionNode == null) {
                 matchConditionNode = CollUtil.findOne(currentNode.getConditionNodes(),
                         conditionNode -> BooleanUtil.isTrue(conditionNode.getConditionSetting().getDefaultFlow()));
@@ -974,8 +814,8 @@ public class SimpleModelUtils {
         if (nodeType == BpmSimpleModelNodeTypeEnum.INCLUSIVE_BRANCH_NODE) {
             // 查找满足条件的 BpmSimpleModelNodeVO 节点
             Collection<BpmSimpleModelNodeVO> matchConditionNodes = CollUtil.filterNew(currentNode.getConditionNodes(),
-                        conditionNode -> !BooleanUtil.isTrue(conditionNode.getConditionSetting().getDefaultFlow())
-                                && evalConditionExpress(variables, conditionNode.getConditionSetting()));
+                    conditionNode -> !BooleanUtil.isTrue(conditionNode.getConditionSetting().getDefaultFlow())
+                            && evalConditionExpress(variables, conditionNode.getConditionSetting()));
             if (CollUtil.isEmpty(matchConditionNodes)) {
                 matchConditionNodes = CollUtil.filterNew(currentNode.getConditionNodes(),
                         conditionNode -> BooleanUtil.isTrue(conditionNode.getConditionSetting().getDefaultFlow()));
@@ -1001,4 +841,27 @@ public class SimpleModelUtils {
         return BpmnModelUtils.evalConditionExpress(variables, buildConditionExpression(conditionSetting));
     }
 
+    // TODO @芋艿：【高】要不要优化下，抽个 HttpUtils
+
+    /**
+     * 添加 HTTP 请求参数。请求头或者请求体
+     *
+     * @param params           HTTP 请求参数
+     * @param paramSettings    HTTP 请求参数设置
+     * @param processVariables 流程变量
+     */
+    public static void addHttpRequestParam(MultiValueMap<String, String> params,
+                                           List<BpmSimpleModelNodeVO.HttpRequestParam> paramSettings,
+                                           Map<String, Object> processVariables) {
+        if (CollUtil.isEmpty(paramSettings)) {
+            return;
+        }
+        paramSettings.forEach(item -> {
+            if (item.getType().equals(BpmHttpRequestParamTypeEnum.FIXED_VALUE.getType())) {
+                params.add(item.getKey(), item.getValue());
+            } else if (item.getType().equals(BpmHttpRequestParamTypeEnum.FROM_FORM.getType())) {
+                params.add(item.getKey(), processVariables.get(item.getValue()).toString());
+            }
+        });
+    }
 }
